@@ -1,0 +1,18 @@
+# robots.txt for AI Examination Portal
+# Block all crawlers by default
+
+User-agent: *
+Disallow: /
+
+# Allow search engines to crawl only specific paths if needed
+# User-agent: Googlebot
+# Allow: /public/
+# Disallow: /admin/
+# Disallow: /api/
+# Disallow: /student/
+
+# Sitemap location
+# Sitemap: https://yourdomain.com/sitemap.xml
+
+# Crawl delay to prevent server overload
+Crawl-delay: 10

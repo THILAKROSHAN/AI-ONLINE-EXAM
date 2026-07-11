@@ -1,0 +1,433 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==================== Helper Functions ====================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Get user role
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    // Get user organization
+    function getUserOrganization() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.organizationId;
+    }
+    
+    // Check if user is super admin
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserRole() == 'super_admin';
+    }
+    
+    // Check if user is organization admin
+    function isOrganizationAdmin() {
+      return isAuthenticated() && getUserRole() == 'organization_admin';
+    }
+    
+    // Check if user is sub admin
+    function isSubAdmin() {
+      return isAuthenticated() && getUserRole() == 'sub_admin';
+    }
+    
+    // Check if user is admin (super, org admin, or sub admin)
+    function isAdmin() {
+      return isAuthenticated() && (isSuperAdmin() || isOrganizationAdmin() || isSubAdmin());
+    }
+    
+    // Check if user is student
+    function isStudent() {
+      return isAuthenticated() && getUserRole() == 'student';
+    }
+    
+    // Check if user belongs to organization
+    function belongsToOrganization(orgId) {
+      return isAuthenticated() && getUserOrganization() == orgId;
+    }
+    
+    // Check if user is owner of document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user has specific permission
+    function hasPermission(permission) {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userData.permissions != null && permission in userData.permissions && userData.permissions[permission] == true;
+    }
+    
+    // Check if user can read
+    function canRead() {
+      return isAuthenticated();
+    }
+    
+    // Check if user can write
+    function canWrite() {
+      return isAdmin();
+    }
+    
+    // Check if user can delete
+    function canDelete() {
+      return isAdmin();
+    }
+    
+    // Validate required fields
+    function hasRequiredFields(fields) {
+      return fields.all(f => f in request.resource.data && request.resource.data[f] != null);
+    }
+    
+    // Validate email format
+    function isValidEmail(email) {
+      return email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+    
+    // Validate phone format
+    function isValidPhone(phone) {
+      return phone == null || phone.matches('^[0-9+\\-\\s()]{10,15}$');
+    }
+    
+    // Sanitize input
+    function sanitizeInput(value) {
+      return value != null && value.size() < 10000;
+    }
+    
+    // ==================== Users Collection ====================
+    
+    match /users/{userId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        isOwner(userId) || 
+        (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        (isSubAdmin() && belongsToOrganization(resource.data.organizationId))
+      );
+      
+      // Create rules
+      allow create: if isAuthenticated() && 
+        hasRequiredFields(['email', 'role']) &&
+        isValidEmail(request.resource.data.email) &&
+        request.resource.data.role in ['super_admin', 'organization_admin', 'sub_admin', 'student'];
+      
+      // Update rules
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() || 
+        isOwner(userId) ||
+        (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        (isSubAdmin() && belongsToOrganization(resource.data.organizationId))
+      ) &&
+        request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'phone', 'isActive', 'updatedAt']);
+      
+      // Delete rules
+      allow delete: if isSuperAdmin() || 
+        (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId));
+    }
+    
+    // ==================== Organizations Collection ====================
+    
+    match /organizations/{orgId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(orgId)
+      );
+      
+      // Create rules
+      allow create: if isSuperAdmin() && 
+        hasRequiredFields(['name', 'email']) &&
+        isValidEmail(request.resource.data.email);
+      
+      // Update rules
+      allow update: if isSuperAdmin() || 
+        (isOrganizationAdmin() && belongsToOrganization(orgId));
+      
+      // Delete rules
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ==================== Students Collection ====================
+    
+    match /students/{studentId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId) ||
+        isOwner(resource.data.uid)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        hasRequiredFields(['name', 'email', 'organizationId']) &&
+        isValidEmail(request.resource.data.email) &&
+        isValidPhone(request.resource.data.phone);
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId) &&
+        request.resource.data.keys().hasOnly(['name', 'email', 'phone', 'department', 'semester', 'year', 'course', 'batch', 'rollNumber', 'dateOfBirth', 'gender', 'address', 'city', 'state', 'country', 'postalCode', 'parentName', 'parentPhone', 'parentEmail', 'profilePhoto', 'isActive', 'subjects', 'metadata', 'updatedAt']);
+      
+      // Delete rules
+      allow delete: if (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        isSuperAdmin();
+    }
+    
+    // ==================== Administrators Collection ====================
+    
+    match /administrators/{adminId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId) ||
+        isOwner(resource.data.uid)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        hasRequiredFields(['name', 'email', 'role', 'organizationId']) &&
+        isValidEmail(request.resource.data.email) &&
+        request.resource.data.role in ['organization_admin', 'sub_admin'];
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId) &&
+        request.resource.data.keys().hasOnly(['name', 'email', 'phone', 'role', 'department', 'title', 'permissions', 'isActive', 'profilePhoto', 'updatedAt']);
+      
+      // Delete rules
+      allow delete: if (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        isSuperAdmin();
+    }
+    
+    // ==================== Subjects Collection ====================
+    
+    match /subjects/{subjectId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        hasRequiredFields(['name', 'code', 'organizationId']);
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        isSuperAdmin();
+    }
+    
+    // ==================== Questions Collection ====================
+    
+    match /questions/{questionId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        hasRequiredFields(['text', 'type', 'organizationId']) &&
+        request.resource.data.type in ['mcq', 'true_false', 'fill_blank', 'descriptive', 'paragraph'];
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        isSuperAdmin();
+    }
+    
+    // ==================== Exams Collection ====================
+    
+    match /exams/{examId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId) ||
+        (isStudent() && resource.data.assignedStudents != null && request.auth.uid in resource.data.assignedStudents)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        hasRequiredFields(['title', 'organizationId']);
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId)) ||
+        isSuperAdmin();
+    }
+    
+    // ==================== Exam Attempts Collection ====================
+    
+    match /examAttempts/{attemptId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId) ||
+        isOwner(resource.data.studentId)
+      );
+      
+      // Create rules
+      allow create: if isAuthenticated() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        isOwner(request.resource.data.studentId);
+      
+      // Update rules
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        isOwner(resource.data.studentId)
+      ) && belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ==================== Results Collection ====================
+    
+    match /results/{resultId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId) ||
+        isOwner(resource.data.studentId)
+      );
+      
+      // Create rules
+      allow create: if isAuthenticated() && 
+        belongsToOrganization(request.resource.data.organizationId) &&
+        (isAdmin() || isOwner(request.resource.data.studentId));
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if isSuperAdmin() || 
+        (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId));
+    }
+    
+    // ==================== Audit Logs Collection ====================
+    
+    match /auditLogs/{logId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId)
+      );
+      
+      // Create rules
+      allow create: if isAuthenticated() && 
+        hasRequiredFields(['action', 'organizationId']);
+      
+      // Update rules
+      allow update: if false; // Audit logs are immutable
+      
+      // Delete rules
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ==================== Notifications Collection ====================
+    
+    match /notifications/{notificationId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId) ||
+        isOwner(resource.data.recipientId)
+      );
+      
+      // Create rules
+      allow create: if isAuthenticated() && 
+        hasRequiredFields(['message', 'recipientId']);
+      
+      // Update rules
+      allow update: if isAuthenticated() && 
+        (isAdmin() || isOwner(resource.data.recipientId)) &&
+        request.resource.data.keys().hasOnly(['isRead', 'readAt', 'updatedAt']);
+      
+      // Delete rules
+      allow delete: if isSuperAdmin() || 
+        (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId));
+    }
+    
+    // ==================== Reports Collection ====================
+    
+    match /reports/{reportId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId);
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if isSuperAdmin() || 
+        (isOrganizationAdmin() && belongsToOrganization(resource.data.organizationId));
+    }
+    
+    // ==================== Settings Collection ====================
+    
+    match /settings/{settingId} {
+      // Read rules
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        belongsToOrganization(resource.data.organizationId)
+      );
+      
+      // Create rules
+      allow create: if isAdmin() && 
+        belongsToOrganization(request.resource.data.organizationId);
+      
+      // Update rules
+      allow update: if isAdmin() && 
+        belongsToOrganization(resource.data.organizationId);
+      
+      // Delete rules
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ==================== Storage Rules ====================
+    
+    match /storage/{bucket}/o {
+      match /{allPaths=**} {
+        // Read rules
+        allow read: if isAuthenticated();
+        
+        // Write rules
+        allow write: if isAuthenticated() && (
+          isSuperAdmin() || 
+          isOrganizationAdmin() || 
+          isSubAdmin() ||
+          (isStudent() && resource.name.matches('students/.*'))
+        );
+        
+        // Delete rules
+        allow delete: if isAdmin();
+      }
+    }
+  }
+}

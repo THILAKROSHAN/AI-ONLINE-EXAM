@@ -1,0 +1,28 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions for AI Examination Portal",
+  "scripts": {
+    "lint": "eslint .",
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^11.10.1",
+    "firebase-functions": "^4.4.1",
+    "nodemailer": "^6.9.4",
+    "handlebars": "^4.7.8"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0",
+    "eslint-plugin-promise": "^6.1.1",
+    "firebase-functions-test": "^3.1.0"
+  },
+  "private": true
+}

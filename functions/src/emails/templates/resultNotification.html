@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: #2563eb;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+        }
+        .header.passed {
+            background: #10b981;
+        }
+        .header.failed {
+            background: #ef4444;
+        }
+        .content {
+            background: #f8fafc;
+            padding: 30px;
+            border-radius: 0 0 8px 8px;
+            border: 1px solid #e2e8f0;
+            border-top: none;
+        }
+        .score-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            margin: 20px 0;
+        }
+        .score-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .score-row:last-child {
+            border-bottom: none;
+        }
+        .score-row .label {
+            color: #64748b;
+        }
+        .score-row .value {
+            font-weight: bold;
+        }
+        .score-row .value.passed {
+            color: #10b981;
+        }
+        .score-row .value.failed {
+            color: #ef4444;
+        }
+        .grade {
+            font-size: 48px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .grade.passed {
+            color: #10b981;
+        }
+        .grade.failed {
+            color: #ef4444;
+        }
+        .button {
+            display: inline-block;
+            background: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .footer {
+            text-align: center;
+            color: #64748b;
+            font-size: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .status-badge.passed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .status-badge.failed {
+            background: #fecaca;
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body>
+    <div class="header {{#if (eq status "Passed")}}passed{{else}}failed{{/if}}">
+        <h1>Exam Results</h1>
+    </div>
+    <div class="content">
+        <h2>Hello {{name}},</h2>
+        <p>Your results for <strong>{{examTitle}}</strong> are now available:</p>
+
+        <div class="grade {{#if (eq status "Passed")}}passed{{else}}failed{{/if}}">
+            {{grade}}
+        </div>
+
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span class="status-badge {{#if (eq status "Passed")}}passed{{else}}failed{{/if}}">
+                {{status}}
+            </span>
+        </div>
+
+        <div class="score-card">
+            <div class="score-row">
+                <span class="label">Score</span>
+                <span class="value">{{score}}%</span>
+            </div>
+            <div class="score-row">
+                <span class="label">Marks Obtained</span>
+                <span class="value">{{obtainedMarks}} / {{totalMarks}}</span>
+            </div>
+            <div class="score-row">
+                <span class="label">Rank</span>
+                <span class="value">#{{rank}}</span>
+            </div>
+        </div>
+
+        <p>You can view your detailed results and performance analysis at any time:</p>
+        <p style="text-align: center;">
+            <a href="{{resultUrl}}" class="button">View Detailed Results</a>
+        </p>
+
+        <p>If you have any questions about your results, please contact our support team at <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>
+
+        <div class="footer">
+            <p>&copy; {{organization}}. All rights reserved.</p>
+            <p>This email was sent to you as part of your exam result notification.</p>
+        </div>
+    </div>
+</body>
+</html>

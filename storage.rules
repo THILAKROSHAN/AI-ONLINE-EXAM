@@ -1,0 +1,261 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ==================== Helper Functions ====================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Get user role from Firestore
+    function getUserRole() {
+      return get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    // Get user organization from Firestore
+    function getUserOrganization() {
+      return get(/databases/(default)/documents/users/$(request.auth.uid)).data.organizationId;
+    }
+    
+    // Check if user is super admin
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserRole() == 'super_admin';
+    }
+    
+    // Check if user is organization admin
+    function isOrganizationAdmin() {
+      return isAuthenticated() && getUserRole() == 'organization_admin';
+    }
+    
+    // Check if user is sub admin
+    function isSubAdmin() {
+      return isAuthenticated() && getUserRole() == 'sub_admin';
+    }
+    
+    // Check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && (isSuperAdmin() || isOrganizationAdmin() || isSubAdmin());
+    }
+    
+    // Check if user is student
+    function isStudent() {
+      return isAuthenticated() && getUserRole() == 'student';
+    }
+    
+    // Check if user owns the student profile
+    function isStudentOwner(studentId) {
+      return isAuthenticated() && request.auth.uid == studentId;
+    }
+    
+    // Check if user belongs to organization
+    function belongsToOrganization(orgId) {
+      return isAuthenticated() && getUserOrganization() == orgId;
+    }
+    
+    // Validate file type
+    function isValidImageType() {
+      return request.resource.contentType.matches('image/(png|jpeg|jpg|gif|svg|webp|bmp|ico)');
+    }
+    
+    // Validate file size (max 5MB for images)
+    function isValidImageSize() {
+      return request.resource.size < 5 * 1024 * 1024;
+    }
+    
+    // Validate file size (max 10MB for documents)
+    function isValidDocumentSize() {
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+    
+    // Validate file size (max 20MB for imports)
+    function isValidImportSize() {
+      return request.resource.size < 20 * 1024 * 1024;
+    }
+    
+    // Validate file extension
+    function isValidImageExtension() {
+      return request.resource.name.matches('.*\\.(png|jpeg|jpg|gif|svg|webp|bmp|ico)$');
+    }
+    
+    function isValidDocumentExtension() {
+      return request.resource.name.matches('.*\\.(pdf|doc|docx|txt|rtf)$');
+    }
+    
+    function isValidSpreadsheetExtension() {
+      return request.resource.name.matches('.*\\.(xls|xlsx|csv)$');
+    }
+    
+    // ==================== Student Profile Photos ====================
+    
+    match /student_photos/{userId}/{fileName} {
+      // Read rules - anyone authenticated can view
+      allow read: if isAuthenticated();
+      
+      // Write rules - only the student owner or admin can upload
+      allow write: if isAuthenticated() && (
+        // Student uploading their own photo
+        (isStudent() && isStudentOwner(userId) && 
+         isValidImageType() && 
+         isValidImageSize() &&
+         isValidImageExtension()) ||
+        
+        // Admin uploading for any student
+        (isAdmin() && 
+         isValidImageType() && 
+         isValidImageSize() &&
+         isValidImageExtension())
+      );
+      
+      // Delete rules - only admin or the student owner can delete
+      allow delete: if isAuthenticated() && (
+        (isStudent() && isStudentOwner(userId)) ||
+        isAdmin()
+      );
+    }
+    
+    // ==================== Student Import Files ====================
+    
+    match /student_imports/{organizationId}/{fileName} {
+      // Read rules - only admin can read
+      allow read: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+      
+      // Write rules - only admin can upload
+      allow write: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId) &&
+        isValidSpreadsheetExtension() &&
+        isValidImportSize();
+      
+      // Delete rules - only admin can delete
+      allow delete: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+    }
+    
+    // ==================== Question Import Files ====================
+    
+    match /question_imports/{organizationId}/{fileName} {
+      // Read rules - only admin can read
+      allow read: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+      
+      // Write rules - only admin can upload
+      allow write: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId) &&
+        isValidSpreadsheetExtension() &&
+        isValidImportSize();
+      
+      // Delete rules - only admin can delete
+      allow delete: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+    }
+    
+    // ==================== Exam Results Export ====================
+    
+    match /exam_results/{organizationId}/{examId}/{fileName} {
+      // Read rules - only admin can read
+      allow read: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+      
+      // Write rules - only admin can upload
+      allow write: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId) &&
+        isValidDocumentExtension() &&
+        isValidDocumentSize();
+      
+      // Delete rules - only admin can delete
+      allow delete: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+    }
+    
+    // ==================== Reports ====================
+    
+    match /reports/{organizationId}/{reportId}/{fileName} {
+      // Read rules - authenticated users can read reports
+      allow read: if isAuthenticated() && 
+        (isAdmin() || belongsToOrganization(organizationId));
+      
+      // Write rules - only admin can upload
+      allow write: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId) &&
+        isValidDocumentExtension() &&
+        isValidDocumentSize();
+      
+      // Delete rules - only admin can delete
+      allow delete: if isAuthenticated() && isAdmin() && 
+        belongsToOrganization(organizationId);
+    }
+    
+    // ==================== Admin Profile Photos ====================
+    
+    match /admin_photos/{userId}/{fileName} {
+      // Read rules - anyone authenticated can view
+      allow read: if isAuthenticated();
+      
+      // Write rules - only the admin owner or super admin can upload
+      allow write: if isAuthenticated() && (
+        // Admin uploading their own photo
+        (isAdmin() && request.auth.uid == userId && 
+         isValidImageType() && 
+         isValidImageSize() &&
+         isValidImageExtension()) ||
+        
+        // Super admin uploading for any admin
+        (isSuperAdmin() && 
+         isValidImageType() && 
+         isValidImageSize() &&
+         isValidImageExtension())
+      );
+      
+      // Delete rules - only the admin owner or super admin can delete
+      allow delete: if isAuthenticated() && (
+        (isAdmin() && request.auth.uid == userId) ||
+        isSuperAdmin()
+      );
+    }
+    
+    // ==================== Organization Logos ====================
+    
+    match /organization_logos/{organizationId}/{fileName} {
+      // Read rules - anyone authenticated can view
+      allow read: if isAuthenticated();
+      
+      // Write rules - only admin of the organization or super admin can upload
+      allow write: if isAuthenticated() && 
+        (isSuperAdmin() || 
+         (isOrganizationAdmin() && belongsToOrganization(organizationId))) &&
+        isValidImageType() && 
+        isValidImageSize() &&
+        isValidImageExtension();
+      
+      // Delete rules - only admin of the organization or super admin can delete
+      allow delete: if isAuthenticated() && 
+        (isSuperAdmin() || 
+         (isOrganizationAdmin() && belongsToOrganization(organizationId)));
+    }
+    
+    // ==================== Temporary Uploads ====================
+    
+    match /temp/{userId}/{fileName} {
+      // Read rules - only the owner can read
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Write rules - authenticated users can upload temp files
+      allow write: if isAuthenticated() && 
+        request.auth.uid == userId &&
+        request.resource.size < 5 * 1024 * 1024;
+      
+      // Delete rules - only the owner can delete
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // ==================== Default Rules ====================
+    
+    // Deny all other operations by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
