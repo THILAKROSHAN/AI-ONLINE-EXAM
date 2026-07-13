@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { 
-  loginAdmin, 
-  adminGoogleSignIn,
-  adminGoogleSignInPopup,
+import {
+  loginUser,
+  createSuperAdmin,
+  googleSignIn,
   handleRedirectResult,
-  registerAdmin 
 } from '../../services/firebase/auth';
 import Button from '../common/Buttons/Button';
 import Input from '../common/Forms/Input';
@@ -15,7 +14,7 @@ import Spinner from '../common/Loading/Spinner';
 const AdminLogin = () => {
   const navigate = useNavigate();
   const { refreshUserData, loading: authLoading, isAuthenticated, userData } = useAuth();
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -27,12 +26,11 @@ const AdminLogin = () => {
     displayName: '',
   });
 
-  console.log('📋 AdminLogin rendering:', { 
-    authLoading, 
-    isAuthenticated, 
+  console.log('📋 AdminLogin rendering:', {
+    authLoading,
+    isAuthenticated,
     role: userData?.role,
     isProcessingRedirect,
-    loading
   });
 
   // Check for redirect result on mount
@@ -44,24 +42,33 @@ const AdminLogin = () => {
         console.log('🔍 Checking for redirect result...');
         const result = await handleRedirectResult();
         console.log('📋 Redirect result:', result);
-        
+
         if (!isMounted) return;
 
         if (result && result.success) {
           console.log('✅ Redirect successful, refreshing user data...');
           await refreshUserData();
-          console.log('✅ Navigating to dashboard...');
-          navigate('/admin/dashboard');
+
+          if (result.userData.role === 'super_admin' || result.userData.role === 'admin') {
+            navigate('/admin/dashboard');
+          } else if (result.userData.role === 'student') {
+            navigate('/student/dashboard');
+          } else {
+            navigate('/unauthorized');
+          }
+          return;
         } else if (result && result.noResult) {
           console.log('ℹ️ No redirect result found');
           setIsProcessingRedirect(false);
+          return;
         } else if (result && result.success === false) {
           console.error('❌ Redirect error:', result.error);
           setError(result.error || 'Google sign-in failed. Please try again.');
           setIsProcessingRedirect(false);
-        } else {
-          setIsProcessingRedirect(false);
+          return;
         }
+
+        setIsProcessingRedirect(false);
       } catch (error) {
         console.error('❌ Redirect check error:', error);
         if (isMounted) {
@@ -71,14 +78,15 @@ const AdminLogin = () => {
       }
     };
 
+    checkRedirect();
+
+    // Timeout to prevent infinite loading
     const timeoutId = setTimeout(() => {
       if (isMounted && isProcessingRedirect) {
         console.log('⏰ Redirect check timeout');
         setIsProcessingRedirect(false);
       }
-    }, 5000);
-
-    checkRedirect();
+    }, 3000);
 
     return () => {
       isMounted = false;
@@ -86,17 +94,16 @@ const AdminLogin = () => {
     };
   }, [navigate, refreshUserData, isProcessingRedirect]);
 
-  // If already authenticated, redirect to dashboard
-  useEffect(() => {
-    if (!authLoading && isAuthenticated && userData?.role) {
-      console.log('🔄 Already authenticated, redirecting to dashboard');
-      if (userData.role === 'admin' || userData.role === 'super_admin') {
-        navigate('/admin/dashboard');
-      } else if (userData.role === 'student') {
-        navigate('/student/dashboard');
-      }
+  // If already authenticated, redirect
+  if (!authLoading && isAuthenticated && userData?.role) {
+    console.log('🔄 Already authenticated, redirecting based on role:', userData.role);
+    if (userData.role === 'super_admin' || userData.role === 'admin') {
+      navigate('/admin/dashboard');
+    } else if (userData.role === 'student') {
+      navigate('/student/dashboard');
     }
-  }, [authLoading, isAuthenticated, userData, navigate]);
+    return null;
+  }
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -109,8 +116,9 @@ const AdminLogin = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (isSignUp) {
+      // Sign Up flow
       if (!formData.displayName) {
         setError('Please enter your full name');
         return;
@@ -132,14 +140,15 @@ const AdminLogin = () => {
       setError('');
 
       try {
-        const result = await registerAdmin(formData.email, formData.password, {
+        console.log('📝 Attempting Super Admin registration...');
+        const result = await createSuperAdmin(formData.email, formData.password, {
           displayName: formData.displayName,
         });
-        
+        console.log('📋 Registration result:', result);
+
         if (result.success) {
           console.log('✅ Registration successful, refreshing user data...');
           await refreshUserData();
-          console.log('✅ Navigating to dashboard...');
           navigate('/admin/dashboard');
         } else {
           setError(result.error || 'Registration failed. Please try again.');
@@ -151,6 +160,7 @@ const AdminLogin = () => {
         setLoading(false);
       }
     } else {
+      // Login flow
       if (!formData.email || !formData.password) {
         setError('Please fill in all fields');
         return;
@@ -160,21 +170,27 @@ const AdminLogin = () => {
       setError('');
 
       try {
-        console.log('🔑 Attempting admin login...');
-        const result = await loginAdmin(formData.email, formData.password);
+        console.log('🔑 Attempting login...');
+        const result = await loginUser(formData.email, formData.password);
         console.log('📋 Login result:', result);
-        
+
         if (result.success) {
           console.log('✅ Login successful, refreshing user data...');
           await refreshUserData();
-          console.log('✅ Navigating to dashboard...');
-          navigate('/admin/dashboard');
+
+          if (result.userData.role === 'super_admin' || result.userData.role === 'admin') {
+            navigate('/admin/dashboard');
+          } else if (result.userData.role === 'student') {
+            navigate('/student/dashboard');
+          } else {
+            navigate('/unauthorized');
+          }
         } else {
           setError(result.error || 'Login failed. Please try again.');
         }
       } catch (error) {
+        console.error('❌ Login error:', error);
         setError('An unexpected error occurred. Please try again.');
-        console.error('Login error:', error);
       } finally {
         setLoading(false);
       }
@@ -184,72 +200,29 @@ const AdminLogin = () => {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError('');
-    
-    console.log('🔄 Starting Google Sign-In...');
 
     try {
-      // First check if popups are allowed
-      let popupAllowed = false;
-      try {
-        const testPopup = window.open('about:blank', '_blank', 'width=1,height=1');
-        if (testPopup) {
-          testPopup.close();
-          popupAllowed = true;
-          console.log('✅ Popups are allowed');
-        } else {
-          console.log('⚠️ Popups are blocked');
-        }
-      } catch (e) {
-        console.log('⚠️ Popup test failed:', e);
-      }
+      console.log('🔄 Attempting Google Sign-In...');
+      const result = await googleSignIn();
+      console.log('📋 Google Sign-In result:', result);
 
-      if (popupAllowed) {
-        // Try popup method first
-        console.log('🔄 Attempting Google Sign-In popup...');
-        try {
-          const result = await adminGoogleSignInPopup();
-          console.log('📋 Google popup result:', result);
-          
-          if (result.success) {
-            console.log('✅ Google popup successful, refreshing user data...');
-            await refreshUserData();
-            console.log('✅ Navigating to dashboard...');
-            navigate('/admin/dashboard');
-            setLoading(false);
-            return;
-          }
-          
-          if (result.code === 'auth/popup-blocked' || result.code === 'auth/popup-closed-by-user') {
-            console.log('ℹ️ Popup issue, falling back to redirect...');
-            // Fall through to redirect
-          } else if (!result.success) {
-            setError(result.error || 'Google sign-in failed. Please try again.');
-            setLoading(false);
-            return;
-          }
-        } catch (popupError) {
-          console.log('⚠️ Popup error:', popupError);
-          // Fall through to redirect
-        }
-      }
-
-      // Fallback to redirect
-      console.log('🔄 Falling back to Google Sign-In redirect...');
-      try {
-        const redirectResult = await adminGoogleSignIn();
-        console.log('📋 Google redirect result:', redirectResult);
-        
-        if (redirectResult.success && redirectResult.redirecting) {
+      if (result.success) {
+        if (result.redirecting) {
           console.log('🔄 Redirecting to Google...');
-          // The page will redirect, no need to set loading false
           return;
-        } else {
-          setError(redirectResult.error || 'Google sign-in failed. Please try again.');
-          setLoading(false);
         }
-      } catch (redirectError) {
-        console.error('❌ Redirect error:', redirectError);
-        setError('Google sign-in failed. Please try again.');
+        console.log('✅ Google Sign-In successful, refreshing user data...');
+        await refreshUserData();
+
+        if (result.userData.role === 'super_admin' || result.userData.role === 'admin') {
+          navigate('/admin/dashboard');
+        } else if (result.userData.role === 'student') {
+          navigate('/student/dashboard');
+        } else {
+          navigate('/unauthorized');
+        }
+      } else {
+        setError(result.error || 'Google sign-in failed. Please try again.');
         setLoading(false);
       }
     } catch (error) {
@@ -277,12 +250,12 @@ const AdminLogin = () => {
     <div className="w-full max-w-md">
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
-          {isSignUp ? 'Create Admin Account' : 'Admin Login'}
+          {isSignUp ? 'Create Super Admin Account' : 'Admin Login'}
         </h2>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          {isSignUp 
-            ? 'Create an admin account to manage your organization' 
-            : 'Sign in to your admin account to continue'}
+          {isSignUp
+            ? 'Create the first Super Admin account'
+            : 'Sign in to your admin account'}
         </p>
       </div>
 
@@ -406,7 +379,7 @@ const AdminLogin = () => {
       </div>
 
       <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-        {isSignUp ? 'Already have an admin account?' : "Don't have an admin account?"}
+        {isSignUp ? 'Already have an account?' : "Don't have an account?"}
         <button
           type="button"
           onClick={() => {
