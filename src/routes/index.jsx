@@ -2,9 +2,10 @@ import React, { Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import PrivateRoute from './PrivateRoute';
 import PublicRoute from './PublicRoute';
+import AdminRoute from './AdminRoute';
 import Spinner from '../components/common/Loading/Spinner';
 
-// Auth Pages - Lazy loaded
+// Auth Pages
 const AdminLoginPage = React.lazy(() => import('../pages/Auth/AdminLoginPage'));
 const StudentLoginPage = React.lazy(() => import('../pages/Auth/StudentLoginPage'));
 const UnauthorizedPage = React.lazy(() => import('../pages/Auth/UnauthorizedPage'));
@@ -12,7 +13,7 @@ const ForgotPasswordPage = React.lazy(() => import('../pages/Auth/ForgotPassword
 const ResetPasswordPage = React.lazy(() => import('../pages/Auth/ResetPasswordPage'));
 const RegisterPage = React.lazy(() => import('../pages/Auth/RegisterPage'));
 
-// Admin Pages - Lazy loaded
+// Admin Pages
 const AdminDashboardPage = React.lazy(() => import('../pages/Admin/AdminDashboardPage'));
 const ManageAdminsPage = React.lazy(() => import('../pages/Admin/ManageAdminsPage'));
 const ManageStudentsPage = React.lazy(() => import('../pages/Admin/ManageStudentsPage'));
@@ -26,7 +27,7 @@ const ReportsPage = React.lazy(() => import('../pages/Admin/ReportsPage'));
 const AuditLogPage = React.lazy(() => import('../pages/Admin/AuditLogPage'));
 const SettingsPage = React.lazy(() => import('../pages/Admin/SettingsPage'));
 
-// Student Pages - Lazy loaded
+// Student Pages
 const StudentDashboardPage = React.lazy(() => import('../pages/Student/StudentDashboardPage'));
 const StudentExamsPage = React.lazy(() => import('../pages/Student/StudentExamsPage'));
 const ExamAttemptPage = React.lazy(() => import('../pages/Student/ExamAttemptPage'));
@@ -56,7 +57,7 @@ const AppRoutes = () => {
         </Route>
 
         {/* Admin Routes */}
-        <Route element={<PrivateRoute allowedRoles={['super_admin', 'admin']} />}>
+        <Route element={<AdminRoute />}>
           <Route path="/admin" element={<AdminDashboardPage />} />
           <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
           <Route path="/admin/admins" element={<ManageAdminsPage />} />

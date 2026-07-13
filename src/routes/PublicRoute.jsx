@@ -24,17 +24,18 @@ const PublicRoute = () => {
 
   if (isAuthenticated && isAuthorized) {
     const role = userData?.role;
-    console.log('🔀 PublicRoute: User is authenticated, redirecting based on role:', role);
+    console.log('🔀 PublicRoute: Redirecting based on role:', role);
+
     if (role === 'student') {
       return <Navigate to="/student/dashboard" replace />;
     }
-    if (['super_admin', 'admin'].includes(role)) {
+    if (role === 'admin' || role === 'super_admin') {
       return <Navigate to="/admin/dashboard" replace />;
     }
     return <Navigate to="/unauthorized" replace />;
   }
 
-  console.log('✅ PublicRoute: Rendering outlet (public page)');
+  console.log('✅ PublicRoute: Rendering outlet');
   return <Outlet />;
 };
 

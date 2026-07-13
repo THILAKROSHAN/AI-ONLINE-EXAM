@@ -17,31 +17,10 @@ import {
   serverTimestamp,
   writeBatch,
   runTransaction,
-  enableMultiTabIndexedDbPersistence,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
 } from 'firebase/firestore';
-import { db, app } from './config';
+import { db } from './config';
 
-// Initialize Firestore with the new cache settings
-// This replaces the deprecated enableMultiTabIndexedDbPersistence()
-try {
-  // The new recommended way to enable offline persistence
-  // We're using the new cache configuration approach
-  // Note: This is handled during app initialization in config.js
-  // The warning is informational - we can safely ignore it
-  console.log('✅ Firestore offline persistence enabled');
-} catch (error) {
-  console.warn('⚠️ Persistence setup warning:', error);
-}
-
-// If you want to configure cache settings explicitly, you can do:
-// const db = initializeFirestore(app, {
-//   localCache: persistentLocalCache({
-//     tabManager: persistentMultipleTabManager()
-//   })
-// });
+console.log('📦 firestore.js loaded');
 
 // Collection names
 export const COLLECTIONS = {
@@ -61,7 +40,7 @@ export const COLLECTIONS = {
   QUESTION_BANK: 'questionBank',
 };
 
-// CRUD Operations with error handling
+// CRUD Operations
 export const createDocument = async (collectionName, data, id = null) => {
   try {
     const docRef = id 

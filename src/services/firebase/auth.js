@@ -16,39 +16,111 @@ import {
   getRedirectResult,
   setPersistence,
   browserLocalPersistence,
-  browserSessionPersistence,
-  inMemoryPersistence,
 } from 'firebase/auth';
 import { auth } from './config';
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from './config';
 
-export const setAuthPersistence = async (type = 'local') => {
+console.log('📦 auth.js loaded');
+
+// Set persistence
+setPersistence(auth, browserLocalPersistence)
+  .then(() => console.log('✅ Auth persistence set to local'))
+  .catch((error) => console.warn('⚠️ Auth persistence warning:', error));
+
+// ==================== SUPER ADMIN CREATION ====================
+
+export const createSuperAdmin = async (email, password, userData) => {
+  console.log('📝 Creating Super Admin:', email);
+
   try {
-    let persistence;
-    switch (type) {
-      case 'session': persistence = browserSessionPersistence; break;
-      case 'none': persistence = inMemoryPersistence; break;
-      default: persistence = browserLocalPersistence;
+    const usersQuery = query(collection(db, 'users'), where('role', '==', 'super_admin'));
+    const usersSnapshot = await getDocs(usersQuery);
+
+    if (!usersSnapshot.empty) {
+      return { success: false, error: 'Super Admin already exists' };
     }
-    await setPersistence(auth, persistence);
-    console.log('✅ Auth persistence set to:', type);
-    return { success: true };
+
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    console.log('✅ Super Admin Firebase user created:', user.uid);
+
+    if (userData.displayName) {
+      await updateProfile(user, {
+        displayName: userData.displayName,
+        photoURL: userData.photoURL || null,
+      });
+    }
+
+    const userDoc = {
+      uid: user.uid,
+      email: user.email,
+      displayName: userData.displayName || '',
+      photoURL: userData.photoURL || '',
+      role: 'super_admin',
+      organizationId: null,
+      isActive: true,
+      emailVerified: user.emailVerified,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastLogin: serverTimestamp(),
+    };
+
+    await setDoc(doc(db, 'users', user.uid), userDoc);
+    console.log('✅ Super Admin user document created');
+
+    await setDoc(doc(db, 'admins', user.uid), {
+      uid: user.uid,
+      name: userData.displayName || '',
+      email: email,
+      phone: userData.phone || '',
+      role: 'super_admin',
+      organizationId: null,
+      permissions: ['all'],
+      isActive: true,
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    console.log('✅ Super Admin admin document created');
+
+    if (userData.sendVerification !== false) {
+      await sendEmailVerification(user);
+    }
+
+    return { success: true, user, userData: userDoc };
   } catch (error) {
-    console.warn('⚠️ Auth persistence warning:', error);
-    return { success: false, error: error.message };
+    console.error('❌ Super Admin creation error:', error);
+    return { success: false, error: error.message, code: error.code };
   }
 };
 
-export const registerAdmin = async (email, password, adminData) => {
-  console.log('📝 Registering admin:', email);
+// ==================== ADMIN CREATION ====================
+
+export const createAdmin = async (adminData, password) => {
+  console.log('📝 Creating Admin:', adminData.email);
+
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const adminsQuery = query(
+      collection(db, 'admins'),
+      where('organizationId', '==', adminData.organizationId),
+      where('isActive', '==', true)
+    );
+    const adminsSnapshot = await getDocs(adminsQuery);
+
+    if (adminsSnapshot.size >= 5) {
+      return { success: false, error: 'Maximum 5 admins allowed per organization' };
+    }
+
+    const userCredential = await createUserWithEmailAndPassword(auth, adminData.email, password);
     const user = userCredential.user;
-    console.log('✅ Admin user created:', user.uid);
+    console.log('✅ Admin Firebase user created:', user.uid);
 
     if (adminData.displayName) {
-      await updateProfile(user, { displayName: adminData.displayName, photoURL: adminData.photoURL || null });
+      await updateProfile(user, {
+        displayName: adminData.displayName,
+        photoURL: adminData.photoURL || null,
+      });
     }
 
     const userDoc = {
@@ -57,126 +129,56 @@ export const registerAdmin = async (email, password, adminData) => {
       displayName: adminData.displayName || '',
       photoURL: adminData.photoURL || '',
       role: 'admin',
-      organizationId: adminData.organizationId || null,
+      organizationId: adminData.organizationId,
       isActive: true,
       emailVerified: user.emailVerified,
-      createdBy: adminData.createdBy || user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      lastLogin: serverTimestamp(),
+      lastLogin: null,
     };
 
     await setDoc(doc(db, 'users', user.uid), userDoc);
-    console.log('✅ Admin Firestore document created');
+    console.log('✅ Admin user document created');
 
-    if (adminData.sendVerification !== false) {
-      await sendEmailVerification(user);
-    }
+    await setDoc(doc(db, 'admins', user.uid), {
+      uid: user.uid,
+      name: adminData.displayName || '',
+      email: adminData.email,
+      phone: adminData.phone || '',
+      role: 'admin',
+      organizationId: adminData.organizationId,
+      permissions: adminData.permissions || [],
+      department: adminData.department || '',
+      title: adminData.title || '',
+      isActive: true,
+      createdBy: adminData.createdBy,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    console.log('✅ Admin admin document created');
 
     return { success: true, user, userData: userDoc };
   } catch (error) {
-    console.error('❌ Admin registration error:', error);
+    console.error('❌ Admin creation error:', error);
     return { success: false, error: error.message, code: error.code };
   }
 };
 
-export const loginAdmin = async (email, password) => {
-  console.log('🔑 Admin login attempt:', email);
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    console.log('✅ Admin authenticated:', user.uid);
+// ==================== STUDENT CREATION ====================
 
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    if (!userDoc.exists()) {
-      console.log('❌ User document not found');
-      await signOut(auth);
-      return { success: false, error: 'User not found', code: 'auth/user-not-found' };
-    }
+export const createStudent = async (studentData, password) => {
+  console.log('📝 Creating Student:', studentData.email);
 
-    const userData = userDoc.data();
-    console.log('📋 User data retrieved, role:', userData.role);
-
-    if (userData.role !== 'admin' && userData.role !== 'super_admin') {
-      console.log('❌ Invalid role for admin login:', userData.role);
-      await signOut(auth);
-      return { success: false, error: 'Access denied', code: 'auth/unauthorized' };
-    }
-
-    if (!userData.isActive) {
-      console.log('❌ Account is deactivated');
-      await signOut(auth);
-      return { success: false, error: 'Account is deactivated', code: 'auth/account-disabled' };
-    }
-
-    await updateDoc(doc(db, 'users', user.uid), { lastLogin: serverTimestamp() });
-    console.log('✅ Admin login successful');
-    return { success: true, user, userData };
-  } catch (error) {
-    console.error('❌ Admin login error:', error);
-    return { success: false, error: error.message, code: error.code };
-  }
-};
-
-export const loginStudent = async (email, password) => {
-  console.log('🔑 Student login attempt:', email);
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    console.log('✅ Student authenticated:', user.uid);
-
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    if (!userDoc.exists()) {
-      console.log('❌ Student document not found');
-      await signOut(auth);
-      return { 
-        success: false, 
-        error: 'Student account not found', 
-        code: 'auth/student-not-found' 
-      };
-    }
-
-    const userData = userDoc.data();
-    console.log('📋 User data retrieved, role:', userData.role);
-
-    if (userData.role !== 'student') {
-      console.log('❌ Invalid role for student login:', userData.role);
-      await signOut(auth);
-      return { 
-        success: false, 
-        error: 'Access denied', 
-        code: 'auth/unauthorized' 
-      };
-    }
-
-    if (!userData.isActive) {
-      console.log('❌ Account is deactivated');
-      await signOut(auth);
-      return { 
-        success: false, 
-        error: 'Account is deactivated', 
-        code: 'auth/account-disabled' 
-      };
-    }
-
-    await updateDoc(doc(db, 'users', user.uid), { lastLogin: serverTimestamp() });
-    console.log('✅ Student login successful');
-    return { success: true, user, userData };
-  } catch (error) {
-    console.error('❌ Student login error:', error);
-    return { success: false, error: error.message, code: error.code };
-  }
-};
-
-export const createStudentAccount = async (studentData, password) => {
-  console.log('📝 Creating student account:', studentData.email);
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, studentData.email, password);
     const user = userCredential.user;
-    console.log('✅ Student user created:', user.uid);
+    console.log('✅ Student Firebase user created:', user.uid);
 
     if (studentData.displayName) {
-      await updateProfile(user, { displayName: studentData.displayName, photoURL: studentData.photoURL || null });
+      await updateProfile(user, {
+        displayName: studentData.displayName,
+        photoURL: studentData.photoURL || null,
+      });
     }
 
     const userDoc = {
@@ -186,10 +188,23 @@ export const createStudentAccount = async (studentData, password) => {
       photoURL: studentData.photoURL || '',
       role: 'student',
       organizationId: studentData.organizationId,
-      createdBy: studentData.createdBy,
       isActive: true,
       emailVerified: user.emailVerified,
-      studentId: studentData.studentId || '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastLogin: null,
+    };
+
+    await setDoc(doc(db, 'users', user.uid), userDoc);
+    console.log('✅ Student user document created');
+
+    await setDoc(doc(db, 'students', user.uid), {
+      uid: user.uid,
+      name: studentData.displayName || '',
+      email: studentData.email,
+      phone: studentData.phone || '',
+      studentId: studentData.studentId || `STU${Date.now().toString().slice(-6)}`,
+      organizationId: studentData.organizationId,
       department: studentData.department || '',
       semester: studentData.semester || '',
       year: studentData.year || '',
@@ -207,17 +222,15 @@ export const createStudentAccount = async (studentData, password) => {
       parentPhone: studentData.parentPhone || '',
       parentEmail: studentData.parentEmail || '',
       profilePhoto: studentData.profilePhoto || '',
+      createdBy: studentData.createdBy,
+      isActive: true,
       enrolledDate: new Date(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      lastLogin: null,
       totalExams: 0,
       averageScore: 0,
-    };
-
-    await setDoc(doc(db, 'users', user.uid), userDoc);
-    await setDoc(doc(db, 'students', user.uid), userDoc);
-    console.log('✅ Student Firestore documents created');
+    });
+    console.log('✅ Student document created');
 
     return { success: true, user, userData: userDoc };
   } catch (error) {
@@ -226,112 +239,176 @@ export const createStudentAccount = async (studentData, password) => {
   }
 };
 
-// ==================== GOOGLE SIGN-IN ====================
+// ==================== LOGIN ====================
 
-export const adminGoogleSignIn = async () => {
-  console.log('🔄 Starting Google Sign-In redirect...');
+export const loginUser = async (email, password) => {
+  console.log('🔑 Login attempt:', email);
+
   try {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ 
-      prompt: 'select_account',
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    console.log('✅ Authenticated:', user.uid);
+
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    if (!userDoc.exists()) {
+      console.log('❌ User document not found');
+      await signOut(auth);
+      return { success: false, error: 'User not found', code: 'auth/user-not-found' };
+    }
+
+    const userData = userDoc.data();
+    console.log('📋 User data retrieved, role:', userData.role);
+
+    if (!userData.isActive) {
+      console.log('❌ Account is deactivated');
+      await signOut(auth);
+      return { success: false, error: 'Account is deactivated', code: 'auth/account-disabled' };
+    }
+
+    await updateDoc(doc(db, 'users', user.uid), {
+      lastLogin: serverTimestamp(),
     });
-    await signInWithRedirect(auth, provider);
-    console.log('🔄 Redirect initiated to Google');
-    return { success: true, redirecting: true };
+
+    console.log('✅ Login successful');
+    return { success: true, user, userData };
   } catch (error) {
-    console.error('❌ Admin Google sign-in redirect error:', error);
-    return { success: false, error: error.message };
+    console.error('❌ Login error:', error);
+    return { success: false, error: error.message, code: error.code };
   }
 };
 
-export const adminGoogleSignInPopup = async () => {
+// ==================== GOOGLE SIGN-IN - SIMPLIFIED ====================
+
+// Process Google sign-in result
+const processGoogleSignInResult = async (user) => {
+  console.log('👤 Processing Google user:', user.email);
+  console.log('🆔 UID:', user.uid);
+
+  const userDoc = await getDoc(doc(db, 'users', user.uid));
+
+  if (userDoc.exists()) {
+    const userData = userDoc.data();
+    console.log('📋 Existing user, role:', userData.role);
+
+    if (!userData.isActive) {
+      console.log('❌ Account is deactivated');
+      await signOut(auth);
+      return { success: false, error: 'Account is deactivated', code: 'auth/account-disabled' };
+    }
+
+    await updateDoc(doc(db, 'users', user.uid), {
+      lastLogin: serverTimestamp(),
+    });
+
+    console.log('✅ Existing user logged in via Google');
+    return { success: true, user, userData };
+  } else {
+    const usersQuery = query(collection(db, 'users'));
+    const usersSnapshot = await getDocs(usersQuery);
+
+    if (usersSnapshot.empty) {
+      console.log('👑 First user - creating Super Admin');
+
+      const userData = {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || '',
+        photoURL: user.photoURL || '',
+        role: 'super_admin',
+        organizationId: null,
+        isActive: true,
+        emailVerified: user.emailVerified,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastLogin: serverTimestamp(),
+      };
+
+      await setDoc(doc(db, 'users', user.uid), userData);
+      console.log('✅ Super Admin user document created');
+
+      await setDoc(doc(db, 'admins', user.uid), {
+        uid: user.uid,
+        name: user.displayName || '',
+        email: user.email,
+        phone: '',
+        role: 'super_admin',
+        organizationId: null,
+        permissions: ['all'],
+        isActive: true,
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      console.log('✅ Super Admin admin document created');
+
+      return { success: true, user, userData };
+    } else {
+      console.log('❌ New user attempted self-registration via Google');
+      await signOut(auth);
+      return {
+        success: false,
+        error: 'Self-registration is not allowed. Please contact your administrator.',
+        code: 'auth/self-registration-not-allowed'
+      };
+    }
+  }
+};
+
+// Google Sign-In with Popup
+export const googleSignInPopup = async () => {
   console.log('🔄 Starting Google Sign-In popup...');
+
   try {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ 
       prompt: 'select_account',
     });
+
+    console.log('📤 Opening Google Sign-In popup...');
     const result = await signInWithPopup(auth, provider);
-    console.log('✅ Google popup successful:', result.user.uid);
-    
-    const user = result.user;
-    console.log('👤 User from popup:', user.email);
-    
-    // Check if user exists in Firestore
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    
-    if (userDoc.exists()) {
-      const userData = userDoc.data();
-      console.log('📋 Existing user data, role:', userData.role);
-      
-      if (userData.role !== 'admin' && userData.role !== 'super_admin') {
-        console.log('❌ Invalid role for admin:', userData.role);
-        await signOut(auth);
-        return { 
-          success: false, 
-          error: 'Access denied. Admin privileges required.', 
-          code: 'auth/unauthorized' 
-        };
-      }
-      
-      if (!userData.isActive) {
-        console.log('❌ Account is deactivated');
-        await signOut(auth);
-        return { 
-          success: false, 
-          error: 'Account is deactivated. Please contact administrator.', 
-          code: 'auth/account-disabled' 
-        };
-      }
-      
-      await updateDoc(doc(db, 'users', user.uid), { lastLogin: serverTimestamp() });
-      console.log('✅ Admin login successful via popup');
-      return { success: true, user, userData };
-    } else {
-      console.log('🆕 New admin user from Google, creating Firestore document...');
-      const adminData = {
-        displayName: user.displayName || '',
-        photoURL: user.photoURL || '',
-        role: 'admin',
-        organizationId: null,
-        isActive: true,
-        emailVerified: user.emailVerified,
-        createdBy: user.uid,
-      };
-
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid,
-        email: user.email,
-        ...adminData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-      });
-      console.log('✅ New admin Firestore document created');
-
-      return { success: true, user, userData: adminData };
-    }
+    console.log('✅ Google popup successful!');
+    return await processGoogleSignInResult(result.user);
   } catch (error) {
-    console.error('❌ Admin Google sign-in popup error:', error);
+    console.error('❌ Google popup error:', error);
+    
     let errorMessage = error.message;
     let errorCode = error.code;
-    
+
     if (error.code === 'auth/popup-closed-by-user') {
       errorMessage = 'Sign-in popup was closed. Please try again.';
+    } else if (error.code === 'auth/popup-blocked') {
+      errorMessage = 'Pop-up was blocked. Please allow popups for this site and try again.';
     } else if (error.code === 'auth/cancelled-popup-request') {
       errorMessage = 'Multiple sign-in requests. Please try again.';
-    } else if (error.code === 'auth/popup-blocked') {
-      errorMessage = 'Pop-up was blocked. Please allow popups or use the redirect method.';
     }
-    
+
     return { success: false, error: errorMessage, code: errorCode };
   }
 };
 
-// ==================== HANDLE REDIRECT RESULT ====================
+// Google Sign-In with Redirect (Fallback)
+export const googleSignInRedirect = async () => {
+  console.log('🔄 Starting Google Sign-In redirect...');
 
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ 
+      prompt: 'select_account',
+    });
+
+    await signInWithRedirect(auth, provider);
+    console.log('🔄 Redirecting to Google...');
+    return { success: true, redirecting: true };
+  } catch (error) {
+    console.error('❌ Google redirect error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Handle Redirect Result
 export const handleRedirectResult = async () => {
   console.log('🔄 Processing redirect result...');
+
   try {
     const result = await getRedirectResult(auth);
     if (!result) {
@@ -339,64 +416,48 @@ export const handleRedirectResult = async () => {
       return { success: false, noResult: true };
     }
 
-    const user = result.user;
-    console.log('👤 User from redirect:', user.email);
-
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    
-    if (!userDoc.exists()) {
-      console.log('❌ User document not found in Firestore');
-      await signOut(auth);
-      return { success: false, error: 'You are not authorized.', code: 'auth/unauthorized' };
-    }
-
-    const userData = userDoc.data();
-    console.log('📋 User data from Firestore:', { 
-      role: userData.role, 
-      isActive: userData.isActive,
-      email: userData.email 
-    });
-    
-    const validRoles = ['super_admin', 'admin', 'student'];
-    if (!userData.role || !validRoles.includes(userData.role)) {
-      console.log('❌ Invalid role:', userData.role);
-      await signOut(auth);
-      return { success: false, error: 'You are not authorized.', code: 'auth/unauthorized' };
-    }
-
-    if (userData.isActive === false) {
-      console.log('❌ Account is deactivated');
-      await signOut(auth);
-      return { success: false, error: 'Account is deactivated.', code: 'auth/account-disabled' };
-    }
-
-    // Check role-specific access
-    if (userData.role !== 'admin' && userData.role !== 'super_admin') {
-      console.log('❌ Not an admin role:', userData.role);
-      await signOut(auth);
-      return { success: false, error: 'Access denied. Admin privileges required.', code: 'auth/unauthorized' };
-    }
-
-    await updateDoc(doc(db, 'users', user.uid), { lastLogin: serverTimestamp() });
-    console.log('✅ Admin login successful via redirect');
-    return { success: true, user, userData };
+    console.log('✅ Redirect result found!');
+    return await processGoogleSignInResult(result.user);
   } catch (error) {
     console.error('❌ Redirect error:', error);
     return { success: false, error: error.message, code: error.code };
   }
 };
 
+// Main Google Sign-In - Try popup first, then redirect
+export const googleSignIn = async () => {
+  console.log('🔄 Starting Google Sign-In...');
+  
+  // Try popup first
+  const popupResult = await googleSignInPopup();
+  
+  // If popup was blocked or closed, try redirect
+  if (!popupResult.success && 
+      (popupResult.code === 'auth/popup-blocked' || 
+       popupResult.code === 'auth/popup-closed-by-user' ||
+       popupResult.code === 'auth/cancelled-popup-request')) {
+    console.log('🔄 Popup failed, falling back to redirect...');
+    return await googleSignInRedirect();
+  }
+  
+  return popupResult;
+};
+
+// ==================== LOGOUT ====================
+
 export const logoutUser = async () => {
-  console.log('🔓 Logging out user...');
+  console.log('🔓 Logging out...');
   try {
     await signOut(auth);
-    console.log('✅ User logged out successfully');
+    console.log('✅ Logged out successfully');
     return { success: true };
   } catch (error) {
     console.error('❌ Logout error:', error);
     return { success: false, error: error.message };
   }
 };
+
+// ==================== PASSWORD RESET ====================
 
 export const sendPasswordReset = async (email) => {
   console.log('📧 Sending password reset to:', email);
@@ -449,12 +510,18 @@ export const changePassword = async (currentPassword, newPassword) => {
   }
 };
 
+// ==================== PROFILE UPDATE ====================
+
 export const updateUserProfile = async (displayName, photoURL) => {
   try {
     const user = auth.currentUser;
     if (!user) throw new Error('No user logged in');
     await updateProfile(user, { displayName, photoURL });
-    await updateDoc(doc(db, 'users', user.uid), { displayName, photoURL, updatedAt: serverTimestamp() });
+    await updateDoc(doc(db, 'users', user.uid), {
+      displayName,
+      photoURL,
+      updatedAt: serverTimestamp(),
+    });
     console.log('✅ Profile updated successfully');
     return { success: true };
   } catch (error) {
@@ -462,6 +529,8 @@ export const updateUserProfile = async (displayName, photoURL) => {
     return { success: false, error: error.message };
   }
 };
+
+// ==================== GET CURRENT USER DATA ====================
 
 export const getCurrentUserData = async () => {
   try {
@@ -493,20 +562,24 @@ export const getCurrentUserData = async () => {
   }
 };
 
+// ==================== AUTH STATE OBSERVER ====================
+
 export const onAuthStateChange = (callback) => {
   console.log('👀 Setting up auth state listener...');
-  return onAuthStateChanged(auth, async (user) => {
-    console.log('🔄 Auth state changed:', user ? `User: ${user.email}` : 'No user');
-    
+
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    console.log('🔥🔥🔥 AUTH STATE CHANGED 🔥🔥🔥');
+    console.log('🔄 User:', user ? user.email : 'No user');
+
     if (user) {
       try {
         console.log('🔍 Fetching Firestore document for:', user.uid);
         const userDoc = await getDoc(doc(db, 'users', user.uid));
-        
+
         if (userDoc.exists()) {
           const userData = userDoc.data();
           console.log('📋 Firestore data found, role:', userData.role);
-          
+
           const validRoles = ['super_admin', 'admin', 'student'];
           if (userData.role && validRoles.includes(userData.role)) {
             console.log('✅ Valid role detected:', userData.role);
@@ -530,7 +603,12 @@ export const onAuthStateChange = (callback) => {
       callback({ user: null, userData: null });
     }
   });
+
+  console.log('✅ Auth listener set up successfully');
+  return unsubscribe;
 };
+
+// ==================== ROLE HELPERS ====================
 
 export const hasRole = (userData, role) => {
   if (!userData) return false;
@@ -552,9 +630,14 @@ export const belongsToOrganization = (userData, organizationId) => {
   return userData.organizationId === organizationId;
 };
 
+export const isSuperAdmin = (userData) => {
+  if (!userData) return false;
+  return userData.role === 'super_admin';
+};
+
 export const isAdmin = (userData) => {
   if (!userData) return false;
-  return ['super_admin', 'admin'].includes(userData.role);
+  return userData.role === 'admin' || userData.role === 'super_admin';
 };
 
 export const isStudent = (userData) => {

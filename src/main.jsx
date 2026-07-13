@@ -11,10 +11,7 @@ if (!rootElement) {
   throw new Error('Root element not found');
 }
 
-ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+// Remove StrictMode to prevent double mounting issues
+ReactDOM.createRoot(rootElement).render(<App />);
 
 console.log('✅ React rendered');

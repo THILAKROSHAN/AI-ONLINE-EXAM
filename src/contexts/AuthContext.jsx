@@ -1,7 +1,6 @@
 // Auth Context
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { onAuthStateChange, logoutUser, getCurrentUserData } from '../services/firebase/auth';
-import { setAuthPersistence } from '../services/firebase/auth';
 import Spinner from '../components/common/Loading/Spinner';
 
 const AuthContext = createContext({
@@ -11,10 +10,9 @@ const AuthContext = createContext({
   error: null,
   isAuthorized: false,
   isAuthenticated: false,
+  isSuperAdmin: false,
   isAdmin: false,
   isStudent: false,
-  isSuperAdmin: false,
-  isOrganizationAdmin: false,
   logout: async () => {},
   refreshUserData: async () => {},
 });
@@ -33,85 +31,94 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
-  const authInitialized = useRef(false);
+  const unsubscribeRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const authCheckedRef = useRef(false);
 
   console.log('🏗️ AuthProvider rendering, loading:', loading);
 
-  useEffect(() => {
-    console.log('🔧 AuthProvider mounted, initializing...');
-    let isMounted = true;
-
-    const initAuth = async () => {
-      try {
-        await setAuthPersistence('local');
-        console.log('✅ Auth persistence configured');
-      } catch (error) {
-        console.warn('⚠️ Auth persistence warning:', error);
-      }
-    };
-    initAuth();
-  }, []);
-
+  // Set up auth state listener
   useEffect(() => {
     console.log('👂 Setting up auth state listener...');
-    let isMounted = true;
 
-    const unsubscribe = onAuthStateChange(async ({ user: authUser, userData: authUserData }) => {
-      console.log('📩 Auth state update received:', {
-        hasUser: !!authUser,
-        hasUserData: !!authUserData,
-        isMounted,
-        authInitialized: authInitialized.current,
+    if (unsubscribeRef.current) {
+      console.log('🧹 Cleaning up previous auth listener');
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    console.log('🔄 Calling onAuthStateChange...');
+    const unsubscribe = onAuthStateChange((authState) => {
+      console.log('📩 Auth state callback EXECUTED!');
+      console.log('📩 Auth state:', {
+        hasUser: !!authState?.user,
+        hasUserData: !!authState?.userData,
+        isMounted: isMountedRef.current,
       });
 
-      if (!isMounted) {
+      if (!isMountedRef.current) {
         console.log('⚠️ Component unmounted, ignoring auth update');
         return;
       }
 
-      // Set user and userData
+      const { user: authUser, userData: authUserData } = authState;
+
       setUser(authUser);
       setUserData(authUserData);
-      
+
       if (authUser && authUserData) {
         console.log('✅ User and data available, checking role...');
         const validRoles = ['super_admin', 'admin', 'student'];
         if (authUserData.role && validRoles.includes(authUserData.role)) {
           console.log('✅ Valid role confirmed:', authUserData.role);
           setIsAuthorized(true);
-          authInitialized.current = true;
         } else {
           console.log('❌ Invalid role detected:', authUserData.role);
           setIsAuthorized(false);
-          await logoutUser();
+          logoutUser();
           setUser(null);
           setUserData(null);
-          authInitialized.current = true;
         }
       } else if (authUser && !authUserData) {
         console.log('⚠️ User has no Firestore document');
         setIsAuthorized(false);
-        await logoutUser();
+        logoutUser();
         setUser(null);
         setUserData(null);
-        authInitialized.current = true;
       } else {
         console.log('🔓 No user logged in');
         setIsAuthorized(false);
-        authInitialized.current = true;
       }
-      
-      // IMPORTANT: Set loading to false after processing auth state
+
       console.log('🔄 Setting loading to false');
+      authCheckedRef.current = true;
       setLoading(false);
     });
 
+    unsubscribeRef.current = unsubscribe;
+    console.log('✅ Auth listener set up successfully');
+
     return () => {
       console.log('🧹 Cleaning up auth state listener');
-      isMounted = false;
-      unsubscribe();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
     };
   }, []);
+
+  // Force loading to false after timeout
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.log('⏰ Loading timeout - forcing loading to false');
+        setLoading(false);
+        authCheckedRef.current = true;
+      }
+    }, 5000);
+
+    return () => clearTimeout(timeoutId);
+  }, [loading]);
 
   const refreshUserData = async () => {
     console.log('🔄 Refreshing user data...');
@@ -169,10 +176,9 @@ export const AuthProvider = ({ children }) => {
     refreshUserData,
     isAuthorized,
     isAuthenticated: !!user && !!userData && isAuthorized,
+    isSuperAdmin: userData?.role === 'super_admin',
     isAdmin: userData?.role === 'admin' || userData?.role === 'super_admin',
     isStudent: userData?.role === 'student',
-    isSuperAdmin: userData?.role === 'super_admin',
-    isOrganizationAdmin: userData?.role === 'admin',
   };
 
   console.log('📤 AuthProvider providing value:', {
@@ -182,8 +188,8 @@ export const AuthProvider = ({ children }) => {
     isAuthorized: value.isAuthorized,
   });
 
-  // Show loading spinner while auth is initializing - FIX: Don't return null
   if (loading) {
+    console.log('⏳ AuthProvider: Showing loading spinner');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
@@ -194,6 +200,7 @@ export const AuthProvider = ({ children }) => {
     );
   }
 
+  console.log('✅ AuthProvider: Rendering children');
   return (
     <AuthContext.Provider value={value}>
       {children}

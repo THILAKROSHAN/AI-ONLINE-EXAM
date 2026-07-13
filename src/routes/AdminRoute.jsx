@@ -4,11 +4,12 @@ import { useAuth } from '../contexts/AuthContext';
 import Spinner from '../components/common/Loading/Spinner';
 
 const AdminRoute = () => {
-  const { user, userData, loading, isAuthenticated, isAdmin } = useAuth();
+  const { user, userData, loading, isAuthenticated, isAuthorized, isAdmin } = useAuth();
 
   console.log('👔 AdminRoute rendering:', {
     loading,
     isAuthenticated,
+    isAuthorized,
     isAdmin,
     userRole: userData?.role,
   });
@@ -21,7 +22,7 @@ const AdminRoute = () => {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !isAuthorized) {
     return <Navigate to="/admin/login" replace />;
   }
 

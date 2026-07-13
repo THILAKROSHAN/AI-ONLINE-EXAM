@@ -1,20 +1,38 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { loginStudent } from '../../services/firebase/auth';
+import { loginUser } from '../../services/firebase/auth';
 import Button from '../common/Buttons/Button';
 import Input from '../common/Forms/Input';
 import Spinner from '../common/Loading/Spinner';
 
 const StudentLogin = () => {
   const navigate = useNavigate();
-  const { refreshUserData } = useAuth();
+  const { refreshUserData, loading: authLoading, isAuthenticated, userData } = useAuth();
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
+
+  console.log('📋 StudentLogin rendering:', { 
+    authLoading, 
+    isAuthenticated, 
+    role: userData?.role,
+  });
+
+  // If already authenticated, redirect based on role
+  if (!authLoading && isAuthenticated && userData?.role) {
+    console.log('🔄 Already authenticated, redirecting based on role:', userData.role);
+    if (userData.role === 'owner' || userData.role === 'admin') {
+      navigate('/admin/dashboard');
+    } else if (userData.role === 'student') {
+      navigate('/student/dashboard');
+    }
+    return null;
+  }
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -37,21 +55,43 @@ const StudentLogin = () => {
     setError('');
 
     try {
-      const result = await loginStudent(formData.email, formData.password);
+      console.log('🔑 Attempting student login...');
+      const result = await loginUser(formData.email, formData.password);
+      console.log('📋 Login result:', result);
       
       if (result.success) {
+        console.log('✅ Login successful, refreshing user data...');
         await refreshUserData();
-        navigate('/student/dashboard');
+        
+        if (result.userData.role === 'student') {
+          navigate('/student/dashboard');
+        } else if (result.userData.role === 'owner' || result.userData.role === 'admin') {
+          navigate('/admin/dashboard');
+        } else {
+          navigate('/unauthorized');
+        }
       } else {
         setError(result.error || 'Login failed. Please try again.');
       }
     } catch (error) {
+      console.error('❌ Login error:', error);
       setError('An unexpected error occurred. Please try again.');
-      console.error('Login error:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  // Show loading while auth is loading
+  if (authLoading) {
+    return (
+      <div className="w-full max-w-md">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 text-center">
+          <Spinner size="lg" />
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md">
